@@ -1,0 +1,20 @@
+{
+  "name": "aws-infra-demo",
+  "version": "1.0.0",
+  "description": "AWS Infrastructure with Pulumi - EC2, S3, Lambda with Layers",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "pulumi up",
+    "destroy": "pulumi destroy",
+    "preview": "pulumi preview"
+  },
+  "dependencies": {
+    "@pulumi/aws": "^6.0.0",
+    "@pulumi/pulumi": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

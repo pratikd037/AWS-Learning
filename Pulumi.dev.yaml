@@ -1,0 +1,5 @@
+config:
+  aws:region: ap-south-1
+  aws-infra-demo:environment: dev
+  aws-infra-demo:awsRegion: ap-south-1
+encryptionsalt: v1:tXVCsNEscuk=:v1:obX6pz1QSJqXiSKc:tcr/cmrgo2dDLst3G8am9nogHRpIKw==

@@ -1,0 +1,7 @@
+name: aws-infra-demo
+description: AWS Infrastructure - EC2 + S3 + 2 Lambda Functions with Layers (Node.js)
+runtime: nodejs
+config:
+  pulumi:tags:
+    value:
+      pulumi:template: aws-typescript
