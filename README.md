@@ -1,565 +1,129 @@
-# 🚀 AWS Infrastructure with Pulumi + Node.js — Full Walkthrough
+# Integrated AWS Cloud Uploader (React + Node.js + Pulumi)
 
-> **Status: ✅ LIVE** — Deployed on AWS `ap-south-1` (Mumbai) on June 3, 2026
+A high-performance, secure web application that bridges a React frontend with AWS S3 and Lambda, protected by AWS Cognito and featuring Google Social Login.
 
----
+## 🏗️ Architecture Overview
 
-## 📋 What We Built
-
-We built a complete **AWS cloud infrastructure** using **Pulumi** (Infrastructure as Code) with **Node.js/TypeScript**. Everything was defined as code — no clicking in the AWS Console.
-
-| Resource | Name | Status |
-|---|---|---|
-| 🖥️ EC2 Instance | `demo-ec2-instance` | ✅ Running |
-| 🪣 S3 Bucket | `demo-s3-bucket-baa3c7c` | ✅ Active |
-| ⚡ Lambda Function 1 | `processor-lambda` | ✅ Live |
-| ⚡ Lambda Function 2 | `scheduler-lambda` | ✅ Live |
-| 📦 Lambda Layer 1 | `utils-layer` | ✅ Active |
-| 📦 Lambda Layer 2 | `aws-helpers-layer` | ✅ Active |
-
-**Total resources created: 25**
+-   **Frontend**: React (Vite) served from Nginx via HTTPS on a `t3.micro` EC2.
+-   **Backend**: Node.js Express server acting as a secure gateway for S3 pre-signed URLs.
+-   **Security**: 
+    -   **Nginx Proxy**: SSL termination with self-signed cert for Cognito compatibility.
+    -   **AWS Cognito**: User Pool & Client managing authentication.
+    -   **JWT Verification**: Backend verifies Cognito tokens before allowing uploads.
+-   **Storage**: S3 Bucket with restricted public access and CORS configured for direct browser uploads.
+-   **Automation**: AWS Lambda triggered instantly on S3 object creation.
 
 ---
 
-## 🏗️ Architecture
+## 🧠 Technical Deep Dive: How the Code Works
 
-```
-Your Machine
-     │
-     │  pulumi up
-     ▼
-┌─────────────────────────────────────────────────────┐
-│              AWS — ap-south-1 (Mumbai)               │
-│                                                     │
-│  ┌──────────────────┐   ┌──────────────────────┐   │
-│  │   EC2 Instance   │   │      S3 Bucket        │   │
-│  │  t3.micro        │   │  demo-s3-bucket-      │   │
-│  │  Amazon Linux    │   │  baa3c7c              │   │
-│  │  2023            │   │  ✓ Versioning ON      │   │
-│  │                  │   │  ✓ Encrypted AES-256  │   │
-│  │  Node.js app     │   │  ✓ Public access OFF  │   │
-│  │  Express :3000   │   └──────────┬───────────┘   │
-│  │  IP:13.203.202.84│              │                │
-│  └──────────────────┘              │ read/write     │
-│                                    │                │
-│  ┌─────────────────────────────────┼─────────────┐  │
-│  │           Lambda Functions      │             │  │
-│  │                                 │             │  │
-│  │  ┌───────────────────┐  ┌───────▼──────────┐ │  │
-│  │  │  scheduler-lambda │  │ processor-lambda │ │  │
-│  │  │  (Function 2)     │  │  (Function 1)    │ │  │
-│  │  │                   │  │                  │ │  │
-│  │  │  Trigger: Every   │  │  Trigger: HTTPS  │ │  │
-│  │  │  5 mins via       │  │  Function URL    │ │  │
-│  │  │  EventBridge      │  │  (public)        │ │  │
-│  │  │                   │  │                  │ │  │
-│  │  │  Uses: Layer 1    │  │  Uses: Layer 1   │ │  │
-│  │  │                   │  │        Layer 2   │ │  │
-│  │  └───────────────────┘  └──────────────────┘ │  │
-│  │                                               │  │
-│  │  ┌────────────────┐  ┌──────────────────────┐ │  │
-│  │  │ Layer 1        │  │ Layer 2              │ │  │
-│  │  │ utils-layer    │  │ aws-helpers-layer    │ │  │
-│  │  │                │  │                      │ │  │
-│  │  │ formatResponse │  │ putJsonToS3          │ │  │
-│  │  │ logger         │  │ listS3Objects        │ │  │
-│  │  │ sleep          │  │                      │ │  │
-│  │  └────────────────┘  └──────────────────────┘ │  │
-│  └───────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
-```
+This project uses **Infrastructure as Code (IaC)** to automate the entire lifecycle of a secure cloud application.
+
+### 1. The Deployment Engine (`index.ts`)
+The core of the project is written in Pulumi (TypeScript). Instead of manual AWS setup, the code defines the "Final State" of the system.
+*   **Sequential Logic**: Pulumi handles the complex order of operations (e.g., creating the S3 bucket *before* creating the Lambda trigger that needs its ARN).
+*   **Interpolation**: Values like the `bucketName` and `userPoolId` are dynamically injected into the server settings at runtime.
+
+### 2. EC2 Provisioning & "Self-Healing"
+Instead of a pre-configured AMI, we use a raw Amazon Linux 2023 image and a **User Data script**:
+*   **Resource Management**: On a `t3.micro` (1GB RAM), `npm install` and SSL processing can cause crashes. Our code automatically creates a **2GB Swap file** to ensure stability.
+*   **SSL/TLS (HTTPS)**: The code generates a self-signed certificate and configures **Nginx** as a reverse proxy. This allows Cognito's strict HTTPS requirements to be met without needing a paid domain.
+*   **PM2 Process Management**: The backend is started using PM2, which monitors the Node.js process and automatically restarts it if it crashes.
+
+### 3. The S3-to-Lambda Bridge
+*   **Direct-to-S3 Uploads**: The frontend doesn't send files to the EC2. Instead, the backend generates a **Pre-signed URL**. This offloads the heavy data transfer from your small EC2 directly to AWS S3, improving performance.
+*   **Event-Driven Trigger**: The S3 notification system is configured to send a JSON event to Lambda. This happens in under <50ms after the file upload is complete.
+
+### 4. Authentication Flow (Cognito + Google)
+*   **Direct Login**: We configured the frontend (`App.jsx`) to use `signInWithRedirect({ provider: 'Google' })`. This bypasses the default Cognito login screen to provide a "Premium" Google-first experience.
+*   **Token Verification**: For security, the backend (`index.js`) uses `aws-jwt-verify`. Every request for an upload URL must include a `Bearer token` in the header, which is validated against the Cognito User Pool keys.
 
 ---
 
-## 🛠️ Technology Stack
+## 🚀 Commands & Deployment
 
-| Tool | Purpose | Version |
-|---|---|---|
-| **Pulumi** | Infrastructure as Code (IaC) | v3.244.0 |
-| **TypeScript** | Pulumi program language | ~5.x |
-| **Node.js** | Lambda runtime + EC2 app | 20.x |
-| **@pulumi/aws** | AWS resource provider | ^6.0.0 |
-| **Express.js** | EC2 web application | ^4.18 |
-
----
-
-## 📁 Project File Structure
-
-```
-IaC/
-├── index.ts          ← All 25 AWS resources defined here
-├── Pulumi.yaml       ← Project name & runtime (nodejs)
-├── Pulumi.dev.yaml   ← Stack config (region: ap-south-1)
-├── package.json      ← Node.js dependencies
-├── tsconfig.json     ← TypeScript compiler settings
-├── deploy.sh         ← One-command deploy script
-├── .env              ← Your AWS credentials (never commit!)
-├── .env.example      ← Safe template to share
-└── .gitignore        ← Protects .env from git
-```
-
----
-
-## 🔑 Step 1 — Understanding Pulumi (IaC)
-
-**Infrastructure as Code (IaC)** means instead of manually clicking in the AWS Console, you **write code** that describes what you want, and Pulumi creates/manages it automatically.
-
-### How Pulumi Works:
-
-```
-You write TypeScript code
-        │
-        ▼
-Pulumi reads your code
-        │
-        ▼
-Pulumi calls AWS APIs
-        │
-        ▼
-AWS creates real resources
-        │
-        ▼
-Pulumi saves "state" (what was created)
-```
-
-### The Pulumi State
-Pulumi keeps a **state file** (`~/.pulumi/stacks/aws-infra-demo/dev.json`) that tracks every resource it created. This lets it:
-- Know what already exists (don't recreate it)
-- Know what changed (update only what's different)
-- Know what to delete when you run `pulumi destroy`
-
----
-
-## 📝 Step 2 — The Main Code (`index.ts`)
-
-The entire infrastructure is defined in one TypeScript file. Here's how each section works:
-
-### 2.1 — Config & Tags
-```typescript
-const cfg = new pulumi.Config();
-const awsRegion = cfg.get("awsRegion") || "us-east-1";
-const env = cfg.get("environment") || "dev";
-const projectTag = { Project: "aws-infra-demo", Environment: env };
-```
-We read config from `Pulumi.dev.yaml` and set tags that appear on every AWS resource.
-
----
-
-### 2.2 — Networking (Default VPC)
-```typescript
-const defaultVpc = aws.ec2.getVpc({ default: true });
-```
-We used AWS's **Default VPC** (every account has one) — no need to create a custom VPC. This keeps the setup simple.
-
-**Security Group** — Acts like a firewall:
-```typescript
-ingress: [
-  { protocol: "tcp", fromPort: 22,   toPort: 22,   ... }, // SSH
-  { protocol: "tcp", fromPort: 80,   toPort: 80,   ... }, // HTTP
-  { protocol: "tcp", fromPort: 3000, toPort: 3000, ... }, // Node.js app
-]
-```
-
----
-
-### 2.3 — EC2 Instance
-
-**What is EC2?**
-EC2 = Elastic Compute Cloud = a **virtual machine** (server) in AWS.
-
-```typescript
-const ec2Instance = new aws.ec2.Instance("demo-ec2-instance", {
-    ami:          al2023Ami.then(a => a.id),  // Amazon Linux 2023
-    instanceType: aws.ec2.InstanceType.T3_Micro,
-    userData:     userDataScript,             // runs on first boot
-    rootBlockDevice: {
-        volumeSize: 30,   // 30GB disk (minimum for AL2023)
-        volumeType: "gp3",
-    },
-});
-```
-
-**User Data Script** — Runs automatically when EC2 boots:
+### 1. Fresh Deployment (From Scratch)
+If you are setting this up for the first time:
 ```bash
-# Installs Node.js 20
-curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-yum install -y nodejs
+# Install root dependencies
+npm install
 
-# Installs PM2 (keeps Node.js app running forever)
-npm install -g pm2
+# Build the frontend locally
+cd src/frontend && npm install && npm run build && cd ../..
 
-# Creates and starts the Express app
-pm2 start server.js --name demo-app
-pm2 startup  # auto-restart on reboot
+# Create the initial deployment package
+zip -r app.zip src/frontend/dist src/backend -x "**/node_modules/*"
+
+# Set Pulumi passphrase
+export PULUMI_CONFIG_PASSPHRASE=your_passphrase_here
+
+# Deploy infrastructure
+pulumi up --yes
 ```
 
-The Express app responds to:
-- `GET /` → Returns hostname, platform, uptime, timestamp
-- `GET /health` → Returns health status
-
-**✅ Verified Live:**
-```json
-{
-  "message": "Hello from EC2! 🚀",
-  "hostname": "ip-172-31-0-239.ap-south-1.compute.internal",
-  "platform": "linux",
-  "uptime": 99.06,
-  "timestamp": "2026-06-03T09:23:33.694Z"
-}
-```
-
----
-
-### 2.4 — S3 Bucket
-
-**What is S3?**
-S3 = Simple Storage Service = **file/object storage** in AWS (like a cloud hard drive).
-
-```typescript
-const s3Bucket = new aws.s3.BucketV2("demo-s3-bucket", { ... });
-```
-
-We added 3 extra configurations:
-
-| Config | What it does |
-|---|---|
-| `BucketPublicAccessBlock` | Blocks ALL public access (security) |
-| `BucketVersioningV2` | Keeps history of every file version |
-| `BucketServerSideEncryptionConfigurationV2` | Encrypts all files with AES-256 |
-
-We also uploaded a sample file:
-```typescript
-new aws.s3.BucketObjectv2("sample-object", {
-    key:     "uploads/hello.json",
-    content: JSON.stringify({ message: "Hello from S3!" }),
-});
-```
-
----
-
-### 2.5 — Lambda Layers
-
-**What are Lambda Layers?**
-A Layer is a **shared code package** that multiple Lambda functions can use — like npm packages but for Lambda. Instead of bundling the same code into every function, you put it in a Layer once.
-
-#### Layer 1 — `utils-layer`
-Shared helper utilities used by **both** Lambda functions:
-
-```javascript
-// formatResponse — standard API response
-function formatResponse(statusCode, data, message) {
-  return {
-    statusCode,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ success: statusCode < 400, message, data }),
-  };
-}
-
-// logger — structured JSON logging to CloudWatch
-function logger(level, msg, meta = {}) {
-  console.log(JSON.stringify({ timestamp: new Date().toISOString(), level, msg }));
-}
-
-// sleep — async delay helper
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-```
-
-#### Layer 2 — `aws-helpers-layer`
-AWS SDK wrappers used by **Lambda Function 1** only:
-
-```javascript
-// Upload JSON data to S3
-async function putJsonToS3(bucket, key, data) { ... }
-
-// List objects in S3
-async function listS3Objects(bucket, prefix) { ... }
-```
-
-**How the code tells Pulumi where to put layer files:**
-```typescript
-code: new pulumi.asset.AssetArchive({
-    "nodejs/node_modules/utils/index.js": new pulumi.asset.StringAsset(`...`),
-})
-```
-The path `nodejs/node_modules/` is the **required folder structure** for Node.js Lambda Layers. AWS automatically adds it to the `NODE_PATH` so functions can `require("utils")` directly.
-
----
-
-### 2.6 — Lambda Function 1 — `processor-lambda`
-
-**Trigger:** Public HTTPS URL (no API Gateway needed!)
-**Layers:** Both Layer 1 + Layer 2
-
-```javascript
-// In the Lambda function, we just require() from the layers:
-const { formatResponse, logger } = require("utils");       // Layer 1
-const { putJsonToS3, listS3Objects } = require("aws-helpers"); // Layer 2
-
-exports.handler = async (event) => {
-  const action = event.queryStringParameters?.action || "list";
-
-  if (action === "upload") {
-    // Save data to S3
-    await putJsonToS3(BUCKET, `records/${Date.now()}.json`, payload);
-    return formatResponse(201, { key }, "Saved to S3!");
-  }
-
-  if (action === "list") {
-    // List files in S3
-    const objects = await listS3Objects(BUCKET, "records/");
-    return formatResponse(200, { objects });
-  }
-};
-```
-
-**Function URL** (public HTTPS endpoint, no API Gateway cost):
-```typescript
-new aws.lambda.FunctionUrl("processor-lambda-url", {
-    authorizationType: "NONE",   // public
-    cors: { allowOrigins: ["*"], allowMethods: ["GET", "POST"] },
-});
-```
-
----
-
-### 2.7 — Lambda Function 2 — `scheduler-lambda`
-
-**Trigger:** EventBridge (runs automatically every 5 minutes)
-**Layers:** Only Layer 1 (utils)
-
-```typescript
-// EventBridge rule
-const schedulerRule = new aws.cloudwatch.EventRule("scheduler-rule", {
-    scheduleExpression: "rate(5 minutes)",
-});
-
-// Connect rule to Lambda
-new aws.cloudwatch.EventTarget("scheduler-target", {
-    rule: schedulerRule.name,
-    arn:  lambdaFn2.arn,
-});
-
-// Give EventBridge permission to invoke Lambda
-new aws.lambda.Permission("scheduler-lambda-permission", {
-    action:    "lambda:InvokeFunction",
-    principal: "events.amazonaws.com",
-    sourceArn: schedulerRule.arn,
-});
-```
-
-The function simulates scheduled tasks (health-check, cleanup, report):
-```javascript
-const tasks = [
-  { name: "health-check",    delay: 100 },
-  { name: "cleanup-temp",    delay: 200 },
-  { name: "generate-report", delay: 150 },
-];
-
-for (const task of tasks) {
-  await sleep(task.delay);  // sleep() comes from utils Layer 1
-  // task complete...
-}
-```
-
----
-
-### 2.8 — IAM Roles
-
-**What is IAM?**
-IAM = Identity and Access Management = **permissions** in AWS.
-
-We created 2 roles:
-
-**EC2 Role** — Allows the EC2 instance to:
-- Connect via AWS Systems Manager (SSM) — no SSH key needed
-- Read/write S3 bucket
-
-**Lambda Role** — Allows Lambda functions to:
-- Write logs to CloudWatch
-- Read/write S3 bucket
-
-```typescript
-const lambdaRole = new aws.iam.Role("lambda-role", {
-    assumeRolePolicy: aws.iam.assumeRolePolicyForPrincipal({
-        Service: "lambda.amazonaws.com"   // only Lambda can use this role
-    }),
-});
-```
-
----
-
-## 🔐 Step 3 — Credentials & Configuration
-
-Instead of the interactive `aws configure` command, we used a `.env` file:
-
+### 2. Updating the Application
+When you make changes to the code and want to deploy the latest version:
 ```bash
-# .env  (never commit this to Git!)
-AWS_ACCESS_KEY_ID=your-key-here
-AWS_SECRET_ACCESS_KEY=your-secret-here
-AWS_DEFAULT_REGION=ap-south-1
-AWS_REGION=ap-south-1
-PULUMI_CONFIG_PASSPHRASE=MySecretPassphrase123
-```
+# 1. Build and Zip
+cd src/frontend && npm run build && cd ../..
+zip -r app.zip src/frontend/dist src/backend -x "**/node_modules/*"
 
-The `deploy.sh` script **sources** this file automatically:
-```bash
-set -a
-source .env   # loads all vars into environment
-set +a
-```
+# 2. Upload to S3
+aws s3 cp app.zip s3://$(pulumi stack output bucketName)/deploy/app.zip
 
-This means **zero interactive prompts** — fully automated deployment.
-
----
-
-## 🚀 Step 4 — Deployment
-
-### The `deploy.sh` script does everything automatically:
-
-```bash
-bash deploy.sh
-```
-
-**What it does step by step:**
-1. ✅ Load `.env` and validate credentials
-2. ✅ Add Pulumi to `$PATH`
-3. ✅ Install Node.js dependencies (`npm install`)
-4. ✅ Login to Pulumi local state (`pulumi login --local`)
-5. ✅ Create or select the `dev` stack
-6. ✅ Set config (region, environment)
-7. ✅ Run `pulumi up --yes` (deploy everything)
-8. ✅ Print all output URLs
-
----
-
-## 🐛 Step 5 — Issues We Fixed
-
-### Issue 1 — Pulumi Not Installed
-**Error:** `pulumi: command not found`
-**Fix:** `curl -fsSL https://get.pulumi.com | sh` — installed Pulumi v3.244.0
-
----
-
-### Issue 2 — EC2 Volume Too Small
-**Error:**
-```
-InvalidBlockDeviceMapping: Volume of size 20GB is smaller than snapshot
-'snap-0ec3fbee2773bece4', expect size >= 30GB
-```
-**Cause:** Amazon Linux 2023 AMI in `ap-south-1` requires **minimum 30GB** disk.
-
-**Fix in `index.ts`:**
-```typescript
-// Before ❌
-volumeSize: 20,
-
-// After ✅
-volumeSize: 30,   // AL2023 in ap-south-1 requires >= 30GB
+# 3. Replace the EC2 instance to pull new code
+pulumi up --replace 'urn:pulumi:dev::aws-infra-demo::aws:ec2/instance:Instance::web-app-instance' --yes
 ```
 
 ---
 
-### Issue 3 — Passphrase Mismatch
-**Error:** `error: incorrect passphrase`
-**Cause:** Pulumi stores an encrypted salt when the stack is first created. Changing the passphrase after creation causes a mismatch.
+## 🔐 Cognito & Google Integration
 
-**Fix:** Restored the original passphrase `MySecretPassphrase123` (the one used at stack init) and passed it explicitly:
-```bash
-PULUMI_CONFIG_PASSPHRASE=MySecretPassphrase123 pulumi up --yes
-```
+### Manual AWS Dashboard Steps:
+Because Google Secrets are sensitive, they must be added manually in the AWS Console:
 
----
+1.  **Add Google Identity Provider**:
+    -   Cognito → User Pools → `cloud-app-user-pool` → **Sign-in experience**.
+    -   Click **Add identity provider** → Select **Google**.
+    -   Paste your **Google Client ID** and **Client Secret**.
+    -   Scopes: `profile email openid`.
 
-## ✅ Step 6 — Live Results
+2.  **Enable Google on App Client**:
+    -   Go to **App integration** → **App clients** → `user-pool-client`.
+    -   Edit **Identity providers** → Check the **Google** box.
 
-### EC2 Instance
-- **URL:** http://13.203.202.84:3000
-- **Instance ID:** `i-09feba8a2c10610eb`
-- **Status:** Running (3/3 checks passed)
-- **Type:** t3.micro in ap-south-1b
-
-### Lambda Functions
-- **processor-lambda URL:** `https://mvplwqo76cksl5nmcuvxunmttm0zyfsg.lambda-url.ap-south-1.on.aws/`
-- **scheduler-lambda:** Runs every 5 minutes automatically
-- **Runtime:** Node.js 20.x
-
-### S3 Bucket
-- **Name:** `demo-s3-bucket-baa3c7c`
-- **Region:** ap-south-1 (Mumbai)
-- **Sample file:** `uploads/hello.json`
+3.  **Update Callbacks**:
+    -   Add `https://YOUR_EC2_IP` to the **Callback URLs** and **Sign-out URLs** in the App Client settings.
+    -   **Note**: Cognito REQUIRES `https` for IP addresses.
 
 ---
 
-## 🧪 Testing Commands
+## 📦 Component Details
 
-```bash
-# ── EC2 Tests ──────────────────────────────────────────────
-curl http://13.203.202.84:3000
-curl http://13.203.202.84/health
+### EC2 (Web Server)
+-   **Instance Type**: `t3.micro` (Amazon Linux 2023).
+-   **RAM Optimization**: Added **2GB Swap space** to prevent OOM errors.
+-   **Nginx**: Reverse proxy (Port 443 -> 3000) with auto-generated self-signed certs.
+-   **PM2**: Node.js process manager to ensure the backend is always running.
 
-# ── Lambda 1: List S3 objects ──────────────────────────────
-curl "https://mvplwqo76cksl5nmcuvxunmttm0zyfsg.lambda-url.ap-south-1.on.aws/?action=list"
+### S3 (Storage)
+-   **CORS**: Configured to allow `PUT` requests from any origin (restricted to your IP for production).
+-   **Security**: Public access blocked; interaction is via Pre-signed URLs for 1-hour windows.
 
-# ── Lambda 1: Upload to S3 ─────────────────────────────────
-curl -X POST \
-  "https://mvplwqo76cksl5nmcuvxunmttm0zyfsg.lambda-url.ap-south-1.on.aws/?action=upload" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"my-test","value":42}'
+### Lambda (Trigger)
+-   **Runtime**: Node.js 20.x.
+-   **Event**: `s3:ObjectCreated:*`.
+-   **Function**: Logs a "Thank You" message and metadata to CloudWatch logs.
 
-# ── Invoke Lambda 2 manually ───────────────────────────────
-export PATH="$HOME/.pulumi/bin:$PATH"
-aws lambda invoke \
-  --function-name scheduler-lambda \
-  --payload '{}' \
-  --cli-binary-format raw-in-base64-out \
-  --region ap-south-1 \
-  response.json && cat response.json
-
-# ── Check CloudWatch Logs ──────────────────────────────────
-aws logs tail /aws/lambda/processor-lambda --follow --region ap-south-1
-aws logs tail /aws/lambda/scheduler-lambda --follow --region ap-south-1
-
-# ── View all Pulumi outputs ────────────────────────────────
-export PATH="$HOME/.pulumi/bin:$PATH" && source .env
-PULUMI_CONFIG_PASSPHRASE=MySecretPassphrase123 pulumi stack output
-```
+### Cognito (Auth)
+-   **User Pool**: Managed directory for your users.
+-   **Auth Flow**: OAuth 2.0 Code Grant.
+-   **Verification**: Backend uses `aws-jwt-verify` to ensure only logged-in users get S3 URLs.
 
 ---
 
-## 🗑️ Tear Down (Delete Everything)
-
-When you want to delete all AWS resources:
-
-```bash
-cd /home/htadmin/Desktop/AWS/IaC
-export PATH="$HOME/.pulumi/bin:$PATH" && source .env
-PULUMI_CONFIG_PASSPHRASE=MySecretPassphrase123 pulumi destroy --yes
-```
-
-This deletes **all 25 resources** from AWS in one command.
-
-> [!WARNING]
-> Running `pulumi destroy` will **permanently delete** the EC2 instance, S3 bucket (and all files in it), Lambda functions, and all other resources. Make sure to back up any important data first.
-
----
-
-## 📚 Key Concepts Learned
-
-| Concept | What it means |
-|---|---|
-| **IaC** | Write code to create infrastructure instead of clicking in console |
-| **Pulumi Stack** | An isolated environment (dev, staging, prod) |
-| **Pulumi State** | File that tracks all created resources |
-| **Lambda Layer** | Shared code package reused across multiple Lambda functions |
-| **Function URL** | Direct HTTPS endpoint for Lambda — no API Gateway needed |
-| **EventBridge** | AWS scheduler — triggers Lambda on a cron/rate schedule |
-| **IAM Role** | Permission set that AWS services use to access other services |
-| **Security Group** | Virtual firewall controlling traffic to/from EC2 |
-| **User Data** | Script that runs automatically when EC2 first boots |
-| **AMI** | Amazon Machine Image — the OS template for EC2 |
-
----
-
-*Generated on June 3, 2026 | AWS Region: ap-south-1 (Mumbai) | Pulumi v3.244.0*
+## 🪵 How to check logs
+-   **Backend Logs**: SSH into EC2 and run `pm2 logs`.
+-   **Lambda Logs**: CloudWatch → Log Groups → `/aws/lambda/thank-you-lambda-...`.
+-   **Deployment Logs**: `/var/log/cloud-init-output.log` on the EC2 instance.
+# AWS-Learning
