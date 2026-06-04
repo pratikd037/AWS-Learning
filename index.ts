@@ -18,6 +18,12 @@ const defaultSubnets = defaultVpc.then(vpc =>
     aws.ec2.getSubnets({ filters: [{ name: "vpc-id", values: [vpc.id] }] })
 );
 
+// Elastic IP for persistent address (declared early to avoid circular deps)
+const eip = new aws.ec2.Eip("web-app-eip", {
+    vpc: true,
+    tags: { ...projectTag, Name: "web-app-eip" },
+});
+
 // Security Group for EC2 (Allow SSH and Web)
 const ec2Sg = new aws.ec2.SecurityGroup("web-app-sg", {
     description: "Allow SSH and HTTP access",
@@ -166,12 +172,22 @@ const userPoolClient = new aws.cognito.UserPoolClient("user-pool-client", {
     allowedOauthFlowsUserPoolClient: true,
     allowedOauthScopes: ["phone", "email", "openid", "profile", "aws.cognito.signin.user.admin"],
     callbackUrls: [
-        "http://localhost:5173", 
+        "http://localhost:5173",
+        pulumi.interpolate`https://${eip.publicIp}`,
     ],
     logoutUrls: [
         "http://localhost:5173",
+        pulumi.interpolate`https://${eip.publicIp}`,
     ],
-    supportedIdentityProviders: ["COGNITO"],
+    idTokenValidity: 60,
+    accessTokenValidity: 60,
+    refreshTokenValidity: 30,
+    tokenValidityUnits: {
+        idToken: "minutes",
+        accessToken: "minutes",
+        refreshToken: "days",
+    },
+    supportedIdentityProviders: ["COGNITO", "Google"],
 });
 
 // ─────────────────────────────────────────────
@@ -264,14 +280,23 @@ EOF
 
 cd $PROJECT_ROOT/src/backend
 npm install
-export S3_BUCKET_NAME=${bucketName}
-export AWS_REGION=${awsRegion}
-export COGNITO_USER_POOL_ID=${upId}
-export COGNITO_CLIENT_ID=${clientId}
-export COGNITO_DOMAIN=${domain}.auth.${awsRegion}.amazoncognito.com
-export PORT=3000
+
+# Create a permanent .env file for persistence
+cat > .env << EOF
+S3_BUCKET_NAME=${bucketName}
+AWS_REGION=${awsRegion}
+COGNITO_USER_POOL_ID=${upId}
+COGNITO_CLIENT_ID=${clientId}
+COGNITO_DOMAIN=${domain}.auth.${awsRegion}.amazoncognito.com
+PORT=3000
+EOF
+
 npm install -g pm2
+# Use pm2 to start the app and save the process list
 pm2 start index.js --name "cloud-app"
+pm2 save
+# Enable pm2 to start on system boot
+pm2 startup | tail -n 1 | bash
 `);
 
 const ec2Instance = new aws.ec2.Instance("web-app-instance", {
@@ -289,9 +314,16 @@ const ec2Instance = new aws.ec2.Instance("web-app-instance", {
     tags: { ...projectTag, Name: "web-app-instance" },
 });
 
+// Link the Elastic IP to the instance
+new aws.ec2.EipAssociation("eip-assoc", {
+    instanceId: ec2Instance.id,
+    allocationId: eip.id,
+});
+
+
 // ─────────────────────────────────────────────
 // OUTPUTS
 // ─────────────────────────────────────────────
-export const appUrl = pulumi.interpolate`https://${ec2Instance.publicIp}`;
+export const appUrl = pulumi.interpolate`https://${eip.publicIp}`;
 export const bucketName = s3Bucket.bucket;
 export const lambdaName = lambdaFn.name;
