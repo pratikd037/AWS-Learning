@@ -126,4 +126,11 @@ Because Google Secrets are sensitive, they must be added manually in the AWS Con
 -   **Backend Logs**: SSH into EC2 and run `pm2 logs`.
 -   **Lambda Logs**: CloudWatch → Log Groups → `/aws/lambda/thank-you-lambda-...`.
 -   **Deployment Logs**: `/var/log/cloud-init-output.log` on the EC2 instance.
+
+---
+
+## 🤖 AWS Bedrock (LLM) Integration
+
+If you want to add generative AI to the backend (securely, using the EC2 instance role), see:
+- `aws-bedrock.md`
 # AWS-Learning
